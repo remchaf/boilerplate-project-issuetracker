@@ -10,13 +10,13 @@ mongoose.connect(process.env.MONGO_URI, {
   useUnifiedTopology: true,
 });
 const issueSchema = new Schema({
-  issue_title: String,
-  issue_text: String,
-  created_by: String,
-  assigned_to: String,
+  issue_title: { type: String, required: true },
+  issue_text: { type: String, required: true },
+  created_by: { type: String, required: true },
+  assigned_to: { type: String, default: "" },
   created_on: Date,
   updated_on: Date,
-  status_text: String,
+  status_text: { type: String, default: "" },
   open: { type: Boolean, default: true },
   project: String,
 });
@@ -27,39 +27,25 @@ module.exports = function (app) {
     .route("/api/issues/:project")
 
     .get(function (req, res) {
-      let project = req.params.project;
-      if (!project) {
+      if (!req.params.project) {
         res.json({ error: "missing project" });
         return;
       }
 
-      if (project == "all") {
-        console.log("Attempt to drop issue collection");
-        try {
-          Issue.deleteMany({}, function (err, result) {
-            if (err) return console.error(err);
-            res.send(result);
-            return;
-          });
-        } catch {
-          res.json({
-            error: "Could not delete all the documents from Issue collection",
-          });
-        }
-      }
-
-      const query = Object.assign(req.body, { project: project });
-      Issue.find(query, "-__v -project -", (err, docsArr) => {
-        if (err) return console.log(err);
-        res.send(docsArr);
-      });
+      const query = Object.assign(req.query, { project: req.params.project });
+      Issue.find(query)
+        .select("-__v -project")
+        .exec((err, docsArr) => {
+          if (err) return console.log(err);
+          res.send(docsArr);
+        });
     })
 
     .post(function (req, res) {
       const body = req.body;
 
       if (!body.issue_title || !body.issue_text || !body.created_by) {
-        res.json({ error: "requied field(s) missing" });
+        res.json({ error: "required field(s) missing" });
         return;
       }
 
@@ -72,10 +58,11 @@ module.exports = function (app) {
       });
       new Issue(obj).save((err, doc) => {
         if (err) return console.error(err);
-        const issue = Object.assign({}, doc._doc, {
-          status_text: "",
-          assigned_to: "",
-        });
+        const issue = doc._doc;
+        // Object.assign({}, doc._doc, {
+        //   status_text: "",
+        //   assigned_to: "",
+        // });
         delete issue.project;
         delete issue.__v;
         res.json(issue);
@@ -109,11 +96,11 @@ module.exports = function (app) {
           update,
           { new: true },
           (err, doc) => {
-            if (err) {
-              res.json({ error: "could not update" });
+            if (err || !doc) {
+              res.json({ error: "could not update", _id });
               return console.log(err);
             }
-            res.json({ result: "successfully updated", _id: doc._id });
+            res.json({ result: "successfully updated", _id: _id });
           }
         );
       }
@@ -128,26 +115,27 @@ module.exports = function (app) {
 
       try {
         ObjectId(_id);
-      } catch {
+
+        Issue.findOneAndDelete({ _id: _id }, (err, doc) => {
+          if (!doc) {
+            res.json({
+              error: "could not delete",
+              _id: _id,
+            });
+            return;
+          }
+
+          res.json({
+            result: "successfully deleted",
+            _id: doc._id,
+          });
+        });
+      } catch (error) {
         res.json({
           error: "could not delete",
           _id,
         });
         return;
       }
-
-      Issue.findOneAndDelete({ _id: _id }, (err, doc) => {
-        if (err) {
-          res.json({
-            error: "could not delete",
-            _id: _id,
-          });
-          return console.log(err);
-        }
-        res.json({
-          result: "successfully deleted",
-          _id: _id,
-        });
-      });
     });
 };
